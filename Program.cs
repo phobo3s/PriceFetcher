@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Reflection.Metadata;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -96,20 +97,20 @@ internal class Program
         // as user if he/she need need prefix for stocks
         Console.WriteLine("Do you want to add prefix to stocks? (Defaul:IS) : ");
         Console.WriteLine("Press space and enter for no prefix");
-        string? userInput = Console.ReadLine();
+        string? userInput2 = Console.ReadLine();
         //stockPrefix
-        if (userInput == "")
+        if (userInput2 == "")
         {
             //do nothing and be default
             stockPrefix = ".IS";
         }
-        else if (userInput == " ")
+        else if (userInput2 == " ")
         {
             stockPrefix = "";
         }
         else
         {
-            stockPrefix = userInput.ToUpper();
+            stockPrefix = userInput2.ToUpper();
         }
         try
         {
@@ -239,6 +240,64 @@ internal class Program
                 }
             }
             Console.WriteLine("Data written to output.csv");
+            Console.WriteLine("Do you want to parse commodities as a list? (Yes/No) : ");
+            string? userInput3 = Console.ReadLine();
+            string postFixForCommodities = "";
+            //stockPrefix
+            if (userInput3.Trim().ToLower() == "y" | userInput3.Trim().ToLower() == "yes")
+            {
+                Console.WriteLine("Postfix for commodities? (Default: TRY");
+                string? userInput4 = Console.ReadLine();
+                if (userInput4 != "")
+                {
+                    postFixForCommodities = userInput4;
+                }
+                Console.WriteLine("creating txt file for commodities...");
+            }
+            else
+            {
+                //do nothing and exit
+                return;
+            }
+            File.Create("Commodity-Prices.txt").Dispose();
+            using (var writer = new StreamWriter("Commodity-Prices.txt", append:false))
+            {
+                using (var reader = new StreamReader(filePath))
+                {
+                    // Read header to extract symbols
+                    var headerLine = reader.ReadLine();
+                    var headers = headerLine.Split(';');
+                    symbols.Clear();
+                    writer.WriteLine("; Commodities");
+                    for (int i = 1; i < headers.Length; i++)
+                    {
+                        symbols.Add(headers[i]);
+                        writer.WriteLine($"commodity {headers[i]} 1.000,00");
+                    }
+                    writer.WriteLine("; ---");
+                    writer.WriteLine("; Prices");
+                    while (!reader.EndOfStream)
+                    {
+                        var line = reader.ReadLine();
+                        var values = line.Split(';');
+                        DateTime date = DateTime.ParseExact(values[0], dateFormats, CultureInfo.InvariantCulture);
+                        for (int i = 1; i <  values.Length; i++)
+                        {
+                            if (values[i] != "")
+                            {
+                                writer.WriteLine($"P    {date.ToString("yyyy-MM-dd")}    {headers[i]}    {values[i]} {postFixForCommodities}");
+                            }
+                        }
+
+                    }
+                }
+            }
+            Console.WriteLine("creating txt file for commodities done!");
+
+
+
+
+
         }
         catch (HttpRequestException e)
         {
