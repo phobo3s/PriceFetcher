@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Globalization;
@@ -10,6 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualBasic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Runtime.InteropServices;
 
 internal class Program
 {
@@ -19,8 +21,8 @@ internal class Program
     static string filePath = "Commodity-Prices.csv";
     // Define date formats to handle different formats
     static string[] dateFormats = { "dd/MM/yyyy", "dd.MM.yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d.MM.yyyy", "yyyy-MM-dd" };
-
-
+    // write some comment here.
+    static string commoditiesStartCsvPath = "Commodity-StartEnds.csv";
 
     static void Main(string[] args)
     {
@@ -38,7 +40,8 @@ internal class Program
         Console.WriteLine("Please select an option. press Enter for exit.");
         Console.WriteLine("1. Price Csv Update/Create");
         Console.WriteLine("2. Parse Prices");
-        Console.WriteLine("3. Get Config");
+        Console.WriteLine("3. Create commodity start/end dates Csv");
+        Console.WriteLine("4. Get Config");
         string? userInput = Console.ReadLine();
         bool exit = false;
         switch (userInput)
@@ -53,6 +56,9 @@ internal class Program
                 ParsePrices();
                 break;
             case "3":
+                CreateCommStartEndFile();
+                break;
+            case "4":
                 GetConfig();
                 break;
             default:
@@ -62,8 +68,70 @@ internal class Program
         return exit;
     }
 
-    
+    private static void CreateCommStartEndFile()
+    {
+        string startEndFilePath = "Commodity-StartEnds.csv";
+        if (!File.Exists(startEndFilePath))
+        { 
+            Console.WriteLine("Commodity start end file not found. Creating one only for you. This may take a while.");
+            File.Create(startEndFilePath).Dispose();
+        }
+        else
+        {
+            Console.WriteLine("This may take a while.");
+        }
+        // hledger commodities komutunu çalıştır ve çıktısını al
+        var commodities = ExecuteShellCommand("hledger commodities")
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        using (var writer = new StreamWriter(startEndFilePath, append:false))
+        {
+            int totalCommodities = commodities.Length;
+            int currentCommodityIndex = 0;
+            foreach (var commodity in commodities)
+            {
+                // İlerleme çubuğunu güncelle
+                UpdateProgressBar(currentCommodityIndex + 1, totalCommodities);
+                // hledger reg cur:<commodity> komutunu çalıştır ve çıktısını al
+                var register = ExecuteShellCommand($"hledger bal -D cur:{commodity} -H -R");
+                // İlgili satırları filtrele
+                var dates = register.Split("\r")[2].Trim().Replace("|| ", "").Split("  ", StringSplitOptions.RemoveEmptyEntries);
+                var values = register.Split("\r")[6].Trim().Replace("|| ", "").Trim().Split("  ", StringSplitOptions.RemoveEmptyEntries);
+                int firstNonZeroIndex = Array.FindIndex(values, item => item.Trim() != "0");
+                int firstZeroIndex;
+                string firstDate;
+                if (firstNonZeroIndex == -1)
+                {
+                    firstZeroIndex = 0;
+                    firstDate = dates[0].Trim();
+                }
+                else
+                {
+                    firstZeroIndex = Array.FindIndex(values, firstNonZeroIndex, item => item.Trim() == "0");
+                    firstDate = dates[firstNonZeroIndex].Trim();
+                }
+                string lastDate = "";
+                if (firstZeroIndex == -1)
+                {
+                    lastDate = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+                }else
+                {
+                    lastDate = dates[firstZeroIndex].Trim();
+                }
+                writer.WriteLine($"{commodity};{firstDate};{lastDate}");
+                currentCommodityIndex++;
+            }
+        }
+    }
+    static void UpdateProgressBar(int current, int total)
+    {
+        Console.CursorVisible = false;
+        Console.SetCursorPosition(0, Console.CursorTop);
+        int barLength = 30;
+        decimal progress = (decimal)current / total;
+        int progressChars = (int)(barLength * progress);
 
+        Console.Write($"[{new string('#', progressChars)}{new string('-', barLength - progressChars)}] {current}/{total}   ");
+    }
     static void GetConfig()
     {
         //valid config examples:
@@ -101,18 +169,15 @@ internal class Program
             File.Create(configFilePath).Dispose();
         }
     }
-
     static async Task Main2()
     {
         HttpClient client = new HttpClient();
         var data = new Dictionary<string, Dictionary<long, double?>>();
-        
-        string commoditiesStartCsvPath = "Commodity-StartEnds.csv";
         DateTime latestDate = DateTime.MinValue;
         bool updateOnlyNewData = false;
         bool appendToFile = false;
         List<string> symbols = new List<string>();
-        var symbolsWithDates = new Dictionary<string, DateTime>();
+        var symbolsWithDates = new Dictionary<string, DateTime[]>();
 
         // Check if the file exists and read the latest date
 
@@ -173,7 +238,11 @@ internal class Program
                     var line = reader.ReadLine();
                     var values = line.Split(';');
                     symbols.Add(values[0]);
-                    symbolsWithDates.Add(values[0], DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture));
+                    // [DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture), DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture)]
+                    //DateTime bla1 = DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture);
+                    //DateTime bla2 = DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture);
+                    DateTime[] vals = {DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture), DateTime.ParseExact(values[2], dateFormats, CultureInfo.InvariantCulture)};
+                    symbolsWithDates.Add(values[0], vals);
                 }
             }
         }
@@ -188,17 +257,21 @@ internal class Program
             string customUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36";
             client.DefaultRequestHeaders.Add("User-Agent", customUserAgent);
             long period1 = 0;
+            long period2 = 0;
             foreach (var symbol in symbols)
             {
                 period1 = 0; // first transaction unix date
+                period2 = (long)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds(); //today unix date
                 if (symbolsWithDates.ContainsKey(symbol))
                 {
-                    period1 = new DateTimeOffset(symbolsWithDates[symbol]).ToUnixTimeSeconds();
+                    period1 = new DateTimeOffset(symbolsWithDates[symbol][0]).ToUnixTimeSeconds();
+                    period2 = new DateTimeOffset(symbolsWithDates[symbol][1].AddDays(1)).ToUnixTimeSeconds();
                 }
                 if (updateOnlyNewData && latestDate != DateTime.MinValue)
                 {
                     period1 = new DateTimeOffset(latestDate.AddDays(1)).ToUnixTimeSeconds();
                 }
+                // data request and writing to dictionry starting here.
                 if (symbol.Length == 3 && symbol != "USD" && symbol != "EUR" && symbol != "GBP")
                 {
                     // Send a GET request to the Yahoo Finance API for other symbols
@@ -226,8 +299,15 @@ internal class Program
                         data[symbol] = new Dictionary<long, double?>();
                         for (int i = 0; i < timestampCloses.Count(); i++)
                         {
-                            double? closeValue = timestampCloses[i][symbol].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][symbol];
-                            data[symbol][(long)((DateTimeOffset)DateTime.ParseExact((string)timestampCloses[i]["date"], dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal)).ToUnixTimeSeconds()] = closeValue;
+                            if (((DateTimeOffset)DateTime.ParseExact((string)timestampCloses[i]["date"], dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal)).ToUnixTimeSeconds() > period2) 
+                            {
+                                i = timestampCloses.Count();
+                            }
+                            else 
+                            { 
+                                double? closeValue = timestampCloses[i][symbol].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][symbol];
+                                data[symbol][(long)((DateTimeOffset)DateTime.ParseExact((string)timestampCloses[i]["date"], dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal)).ToUnixTimeSeconds()] = closeValue;
+                            }
                         }
                     }
                 }
@@ -260,8 +340,15 @@ internal class Program
                         data[symbol] = new Dictionary<long, double?>();
                         for (int i = 0; i < timestamps.Count(); i++)
                         {
-                            double? closeValue = closes[i].Type == JTokenType.Null ? (double?)null : (double)closes[i];
-                            data[symbol][(long)Math.Floor((decimal)timestamps[i] / 86400)*86400 ] = closeValue;
+                            if (Math.Floor((decimal)timestamps[i] / 86400) * 86400 > period2)
+                            {
+                                i = timestamps.Count();
+                            }
+                            else
+                            {
+                                double? closeValue = closes[i].Type == JTokenType.Null ? (double?)null : (double)closes[i];
+                                data[symbol][(long)Math.Floor((decimal)timestamps[i] / 86400) * 86400] = closeValue;
+                            }
                         }
                     }
                 }
@@ -359,5 +446,31 @@ internal class Program
             }
         }
         Console.WriteLine("creating txt file for commodities done!");
+    }
+    static string ExecuteShellCommand(string command)
+    {
+        string shell = "/bin/bash";
+        string args = $"-c \"{command}\"";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            shell = "cmd.exe";
+            args = $"/c \"{command}\"";
+        }
+        var processInfo = new ProcessStartInfo(shell, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var process = Process.Start(processInfo);
+        using var reader = process.StandardOutput;
+        string result = reader.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new Exception($"Komut çalıştırılamadı: {command}");
+        }
+        return result;
     }
 }
