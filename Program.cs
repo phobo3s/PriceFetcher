@@ -7,25 +7,113 @@ using System.Net;
 using System.Net.Http;
 using System.Reflection.Metadata;
 using System.Threading.Tasks;
+using Microsoft.VisualBasic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 internal class Program
 {
-    static readonly HttpClient client = new HttpClient();
-    static async Task Main(string[] args)
+    // options dictionary details in the GetConfig method.
+    static Dictionary<string,string> options = new Dictionary<string, string>();
+    // Main prices.csv path. it is like a database for prices.
+    static string filePath = "Commodity-Prices.csv";
+    // Define date formats to handle different formats
+    static string[] dateFormats = { "dd/MM/yyyy", "dd.MM.yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d.MM.yyyy", "yyyy-MM-dd" };
+
+
+
+    static void Main(string[] args)
     {
+        Console.WriteLine("Hello and welcome to price Fetcher.");
+        GetConfig();
+        bool exit = false;
+        while(!exit) 
+        {
+            exit = WriteMenuGetSelection();
+        }
+
+    }
+    static bool WriteMenuGetSelection()
+    {
+        Console.WriteLine("Please select an option. press Enter for exit.");
+        Console.WriteLine("1. Price Csv Update/Create");
+        Console.WriteLine("2. Parse Prices");
+        Console.WriteLine("3. Get Config");
+        string? userInput = Console.ReadLine();
+        bool exit = false;
+        switch (userInput)
+        {
+            case "":
+                exit = true;
+                break;
+            case "1":
+                Main2().Wait(); // 
+                break;
+            case "2":
+                ParsePrices();
+                break;
+            case "3":
+                GetConfig();
+                break;
+            default:
+                Console.WriteLine("This is out of my imagination. please select again.");
+                break;
+        }
+        return exit;
+    }
+
+    
+
+    static void GetConfig()
+    {
+        //valid config examples:
+        //------------------------
+        //StockPostfix:.IS
+        //CommodityCurrency:TRY
+        //------------------------
+        string configFilePath = "PriceFetcher.config";
+        if (File.Exists(configFilePath))
+        {
+            options.Clear();
+            using (var reader = new StreamReader(configFilePath))
+            {
+                string line = "";
+
+                while (!reader.EndOfStream)
+                {
+                    line = reader.ReadLine();
+                    try
+                    {
+                        options.Add(line.Split(":")[0], line.Split(":")[1]);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("\nException Caught!");
+                        Console.WriteLine("Message :{0} ", ex.Message);
+                    }
+                }
+                Console.WriteLine("Config loaded.");
+            }
+        }
+        else
+        {
+            Console.WriteLine("Config file not found. Created one only for you.");
+            File.Create(configFilePath).Dispose();
+        }
+    }
+
+    static async Task Main2()
+    {
+        HttpClient client = new HttpClient();
         var data = new Dictionary<string, Dictionary<long, double?>>();
-        string filePath = "Commodity-Prices.csv";
+        
         string commoditiesStartCsvPath = "Commodity-StartEnds.csv";
         DateTime latestDate = DateTime.MinValue;
         bool updateOnlyNewData = false;
         bool appendToFile = false;
         List<string> symbols = new List<string>();
         var symbolsWithDates = new Dictionary<string, DateTime>();
-        string stockPrefix = ""; //default stock prefix as Bist-Istanbul.
-        // Define date formats to handle different formats
-        string[] dateFormats = { "dd/MM/yyyy", "dd.MM.yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d.MM.yyyy","yyyy-MM-dd" };
+
         // Check if the file exists and read the latest date
 
         if (File.Exists(filePath))
@@ -92,31 +180,13 @@ internal class Program
         else
         {
             Console.WriteLine($"commodities start dates file {commoditiesStartCsvPath} not found.");
-        }   
-
-        // as user if he/she need need prefix for stocks
-        Console.WriteLine("Do you want to add prefix to stocks? (Defaul:IS) : ");
-        Console.WriteLine("Press space and enter for no prefix");
-        string? userInput2 = Console.ReadLine();
-        //stockPrefix
-        if (userInput2 == "")
-        {
-            //do nothing and be default
-            stockPrefix = ".IS";
         }
-        else if (userInput2 == " ")
-        {
-            stockPrefix = "";
-        }
-        else
-        {
-            stockPrefix = userInput2.ToUpper();
-        }
+        string stockPrefix = ""; //default stock prefix ??
+        if (options.ContainsKey("StockPostfix")) { stockPrefix = options["StockPostfix"]; }
         try
         {
             string customUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36";
             client.DefaultRequestHeaders.Add("User-Agent", customUserAgent);
-            //client.DefaultRequestHeaders.Add("User-Agent", customUserAgent);
             long period1 = 0;
             foreach (var symbol in symbols)
             {
@@ -239,65 +309,6 @@ internal class Program
                     }
                 }
             }
-            Console.WriteLine("Data written to output.csv");
-            Console.WriteLine("Do you want to parse commodities as a list? (Yes/No) : ");
-            string? userInput3 = Console.ReadLine();
-            string postFixForCommodities = "";
-            //stockPrefix
-            if (userInput3.Trim().ToLower() == "y" | userInput3.Trim().ToLower() == "yes")
-            {
-                Console.WriteLine("Postfix for commodities? (Default: TRY");
-                string? userInput4 = Console.ReadLine();
-                if (userInput4 != "")
-                {
-                    postFixForCommodities = userInput4;
-                }
-                Console.WriteLine("creating txt file for commodities...");
-            }
-            else
-            {
-                //do nothing and exit
-                return;
-            }
-            File.Create("Commodity-Prices.txt").Dispose();
-            using (var writer = new StreamWriter("Commodity-Prices.txt", append:false))
-            {
-                using (var reader = new StreamReader(filePath))
-                {
-                    // Read header to extract symbols
-                    var headerLine = reader.ReadLine();
-                    var headers = headerLine.Split(';');
-                    symbols.Clear();
-                    writer.WriteLine("; Commodities");
-                    for (int i = 1; i < headers.Length; i++)
-                    {
-                        symbols.Add(headers[i]);
-                        writer.WriteLine($"commodity {headers[i]} 1.000,00");
-                    }
-                    writer.WriteLine("; ---");
-                    writer.WriteLine("; Prices");
-                    while (!reader.EndOfStream)
-                    {
-                        var line = reader.ReadLine();
-                        var values = line.Split(';');
-                        DateTime date = DateTime.ParseExact(values[0], dateFormats, CultureInfo.InvariantCulture);
-                        for (int i = 1; i <  values.Length; i++)
-                        {
-                            if (values[i] != "")
-                            {
-                                writer.WriteLine($"P    {date.ToString("yyyy-MM-dd")}    {headers[i]}    {values[i]} {postFixForCommodities}");
-                            }
-                        }
-
-                    }
-                }
-            }
-            Console.WriteLine("creating txt file for commodities done!");
-
-
-
-
-
         }
         catch (HttpRequestException e)
         {
@@ -309,5 +320,44 @@ internal class Program
             Console.WriteLine("\nException Caught!");
             Console.WriteLine("Message :{0} ", e.Message);
         }
+    }
+    private static void ParsePrices()
+    {
+        string postFixForCommodities = "TRY"; //default commodity currency
+        if (options.ContainsKey("CommodityCurrency")) { postFixForCommodities = options["CommodityCurrency"]; };
+        List<string> symbols = new List<string>();
+        File.Create("Commodity-Prices.txt").Dispose();
+        using (var writer = new StreamWriter("Commodity-Prices.txt", append: false))
+        {
+            using (var reader = new StreamReader(filePath))
+            {
+                // Read header to extract symbols
+                var headerLine = reader.ReadLine();
+                var headers = headerLine.Split(';');
+                writer.WriteLine("; Commodities");
+                for (int i = 1; i < headers.Length; i++)
+                {
+                    symbols.Add(headers[i]);
+                    writer.WriteLine($"commodity {headers[i]} 1.000,00");
+                }
+                writer.WriteLine("; ---");
+                writer.WriteLine("; Prices");
+                while (!reader.EndOfStream)
+                {
+                    var line = reader.ReadLine();
+                    var values = line.Split(';');
+                    DateTime date = DateTime.ParseExact(values[0], dateFormats, CultureInfo.InvariantCulture);
+                    for (int i = 1; i < values.Length; i++)
+                    {
+                        if (values[i] != "")
+                        {
+                            writer.WriteLine($"P    {date.ToString("yyyy-MM-dd")}    {headers[i]}    {values[i]} {postFixForCommodities}");
+                        }
+                    }
+
+                }
+            }
+        }
+        Console.WriteLine("creating txt file for commodities done!");
     }
 }
