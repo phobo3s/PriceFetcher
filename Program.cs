@@ -99,7 +99,7 @@ internal class Program
                 var register = ExecuteShellCommand($"hledger reg cur:{commodity} -R -O csv");
                 string[] lines = register.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 string firstDate = Regex.Split(lines[1], "\",\"")[1].Trim('\"').Trim();
-                string lastDate = Regex.Split(lines.Last(), "\",\"").Last().Trim('\"').Trim() == "0" | lines.Count() == 1 ? Regex.Split(lines.Last(), "\",\"")[1].Trim('\"').Trim() : "2099-12-31";
+                string lastDate = Regex.Split(lines.Last(), "\",\"").Last().Trim('\"').Trim() == "0" | lines.Count() == 1 ? Regex.Split(lines.Last(), "\",\"")[1].Trim('\"').Trim() : "---";
                 writer.WriteLine($"{commodity};{firstDate};{lastDate}");
                 currentCommodityIndex++;
             }
@@ -112,7 +112,6 @@ internal class Program
         int barLength = 30;
         decimal progress = (decimal)current / total;
         int progressChars = (int)(barLength * progress);
-
         Console.Write($"[{new string('#', progressChars)}{new string('-', barLength - progressChars)}] {current}/{total}   ");
     }
     static void GetConfig()
@@ -160,7 +159,7 @@ internal class Program
         bool updateOnlyNewData = false;
         bool appendToFile = false;
         List<string> symbols = new List<string>();
-        var symbolsWithDates = new Dictionary<string, DateTime[]>();
+        var symbolsWithDates = new Dictionary<string, string[]>();
 
         // Check if the file exists and read the latest date
 
@@ -221,7 +220,7 @@ internal class Program
                     var line = reader.ReadLine();
                     var values = line.Split(';');
                     symbols.Add(values[0]);
-                    DateTime[] vals = {DateTime.ParseExact(values[1], dateFormats, CultureInfo.InvariantCulture), DateTime.ParseExact(values[2], dateFormats, CultureInfo.InvariantCulture)};
+                    string[] vals = {values[1], values[2]};
                     symbolsWithDates.Add(values[0], vals);
                 }
             }
@@ -246,8 +245,15 @@ internal class Program
                 period2 = (long)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds(); //today unix date
                 if (symbolsWithDates.ContainsKey(symbol))
                 {
-                    period1 = new DateTimeOffset(symbolsWithDates[symbol][0]).ToUnixTimeSeconds();
-                    period2 = new DateTimeOffset(symbolsWithDates[symbol][1].AddDays(1)).ToUnixTimeSeconds();
+                    period1 = ((DateTimeOffset)(DateTime.ParseExact(symbolsWithDates[symbol][0], dateFormats, CultureInfo.InvariantCulture))).ToUnixTimeSeconds();
+                    if (symbolsWithDates[symbol][1] == "---")
+                    {
+                        //
+                    }
+                    else
+                    {
+                        period2 = ((DateTimeOffset)(DateTime.ParseExact(symbolsWithDates[symbol][1], dateFormats, CultureInfo.InvariantCulture).AddDays(1))).ToUnixTimeSeconds();
+                    }
                 }
                 if (updateOnlyNewData && latestDate != DateTime.MinValue)
                 {
@@ -263,50 +269,66 @@ internal class Program
                     client.DefaultRequestHeaders.Add("Origin", "https://www.tefas.gov.tr");
                     client.DefaultRequestHeaders.Referrer = new Uri("https://www.tefas.gov.tr");
                     string url = "https://www.tefas.gov.tr/api/DB/BindHistoryInfo";
-
-                    DateTimeOffset currentStartDate = DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime;
-
-
-
-
-
-                    string package = $"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih={DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime.ToString("dd.MM.yyyy")}&bittarih=30.10.2021&fonturkod=&fonunvantip=";
-                    HttpContent _Body = new StringContent(package, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");
-                    var response = client.PostAsync(url,_Body).Result;
-                    
-                    string responseBody = "";
-                    JObject myObject = new JObject();
-                    JArray timestampCloses = new JArray();
-                    try
+                    //
+                    DateTimeOffset startDate = DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime;
+                    DateTimeOffset endDate = DateTimeOffset.FromUnixTimeSeconds(period2).UtcDateTime;
+                    //
+                    DateTimeOffset currentStartDate = startDate;
+                    data[symbol] = new Dictionary<long, double?>();
+                    while (currentStartDate < endDate)
                     {
-                        
-                        response.EnsureSuccessStatusCode();
-                        responseBody = response.Content.ReadAsStringAsync().Result;
-                        myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
-                        timestampCloses = (JArray)myObject["data"];
-                    }
-                    catch (HttpRequestException e)
-                    {
-                        //if (response.StatusCode == HttpStatusCode.NotFound)
-                        //{
-                        //    Console.WriteLine($"not found one. {symbol}");
-                        //}
-                    }
-                    finally 
-                    {
-                        data[symbol] = new Dictionary<long, double?>();
-                        for (int i = 0; i < timestampCloses.Count(); i++)
+                        //
+                        DateTimeOffset currentEndDate = currentStartDate.AddMonths(3);
+                        if (currentEndDate >= endDate)
                         {
-                            if ((long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 8640000) * 86400 > period2) 
+                            currentEndDate = endDate;
+                        }else if (currentEndDate < startDate)
+                        {
+                            //currentEndDate == currentEndDate;
+                        }
+                        string package = $"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih={currentStartDate.ToString("dd.MM.yyyy")}&bittarih={currentEndDate.ToString("dd.MM.yyyy")}&fonturkod=&fonunvantip=";
+                        HttpContent _Body = new StringContent(package, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");                   
+                        string responseBody = "";
+                        JObject myObject = new JObject();
+                        JArray timestampCloses = new JArray();
+                        var response = new HttpResponseMessage { };
+                        try
+                        {
+                            response = client.PostAsync(url, _Body).Result;
+                            response.EnsureSuccessStatusCode();
+                            responseBody = response.Content.ReadAsStringAsync().Result;
+                            myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
+                            timestampCloses = (JArray)myObject["data"];
+                        }
+                        catch (HttpRequestException e)
+                        {
+                            if (response.StatusCode == HttpStatusCode.NotFound)
                             {
-                                i = timestampCloses.Count();
-                            }
-                            else 
-                            { 
-                                double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
-                                data[symbol][(long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 8640000) * 86400] = closeValue;
+                                Console.WriteLine($"not found one. {symbol}");
                             }
                         }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("\nException Caught!");
+                            Console.WriteLine("Message :{0} ", ex.Message);
+                        }
+                        finally
+                        {
+                            
+                            for (int i = 0; i < timestampCloses.Count(); i++)
+                            {
+                                if ((long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
+                                {
+                                    i = timestampCloses.Count();
+                                }
+                                else
+                                {
+                                    double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
+                                    data[symbol][(long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 86400000) * 86400] = closeValue;
+                                }
+                            }
+                        }
+                        currentStartDate = currentStartDate.AddMonths(3);
                     }
                 }
                 else
