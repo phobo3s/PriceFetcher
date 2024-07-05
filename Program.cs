@@ -27,7 +27,6 @@ internal class Program
     static string[] dateFormats = { "dd/MM/yyyy", "dd.MM.yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d.MM.yyyy", "yyyy-MM-dd" };
     // write some comment here.
     static string commoditiesStartCsvPath = "Commodity-StartEnds.csv";
-
     static void Main(string[] args)
     {
         Console.WriteLine("Hello and welcome to price Fetcher.");
@@ -54,7 +53,7 @@ internal class Program
                 exit = true;
                 break;
             case "1":
-                Main2().Wait(); // 
+                PriceUpdater().Wait(); // 
                 break;
             case "2":
                 ParsePrices();
@@ -71,7 +70,6 @@ internal class Program
         }
         return exit;
     }
-
     private static void CreateCommStartEndFile()
     {
         string startEndFilePath = "Commodity-StartEnds.csv";
@@ -151,7 +149,7 @@ internal class Program
             System.IO.File.Create(configFilePath).Dispose();
         }
     }
-    static async Task Main2()
+    static async Task PriceUpdater()
     {
         HttpClient client = new HttpClient();
         var data = new Dictionary<string, Dictionary<long, double?>>();
@@ -162,7 +160,6 @@ internal class Program
         var symbolsWithDates = new Dictionary<string, string[]>();
 
         // Check if the file exists and read the latest date
-
         if (System.IO.File.Exists(filePath))
         {
             using (var reader = new StreamReader(filePath))
@@ -506,121 +503,3 @@ internal class Program
         return result;
     }
 }
-
-
-// Send a GET request to the Yahoo Finance API for other symbols
-//client.DefaultRequestHeaders.Add("authority", "api.fintables.com");
-//client.DefaultRequestHeaders.Add("path", "/funds/AES/chart/?start_date=2021-10-03&compare=");
-//client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
-//client.DefaultRequestHeaders.Add("Cache-Control", "max-age=0");
-//client.DefaultRequestHeaders.Add("Sec-Ch-Ua-Platform", "Windows");
-//client.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
-//client.DefaultRequestHeaders.Add("Origin", "baseUrl");
-//client.DefaultRequestHeaders.Add("Referer", "api.fintables.com");
-//client.DefaultRequestHeaders.Add("Content-Type", "application/x-www-form-urlencoded");
-//client.DefaultRequestHeaders.Add("Accept", "application/json");
-//client.DefaultRequestHeaders.Add("If-Modified-Since", "Sat, 1 Jan 2000 00:00:00 GMT");
-//client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)");
-//client.DefaultRequestHeaders.Add("Content-type", "application/x-www-form-urlencoded");
-//client.DefaultRequestHeaders.Add("referer", "http://www.tefas.gov.tr/TarihselVeriler.aspx");
-//baseUrl            = "https://www.tefas.gov.tr"
-//historyEndpoint = "https://www.tefas.gov.tr/api/DB/BindHistoryInfo"
-//allocationEndpoint = "https://www.tefas.gov.tr/api/DB/BindHistoryAllocation"
-//dateFormat = "2006-01-02"
-//    chunkSize = 60
-
-
-//$"https://api.fintables.com/funds/{symbol}/chart/?start_date={DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime.ToString("yyyy-MM-dd")}&compare=";
-//HttpResponseMessage response = await client.PostAsync(url, new HttpContent
-
-//HttpContent _Body = new StringContent($"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih=12.01.2024&bittarih=30.01.2024&fonturkod=&fonunvantip=");
-
-//using System;
-//using System.Collections.Generic;
-//using System.Net.Http;
-//using System.Net.Http.Headers;
-//using System.Threading.Tasks;
-//using Newtonsoft.Json.Linq;
-
-//public class Program
-//{
-//    public static async Task Main(string[] args)
-//    {
-//        string symbol = "yourSymbol"; // Fon kodu (örnek değer)
-//        DateTime startDateVal = DateTime.Parse("2021-01-01");
-//        DateTime endDateVal = DateTime.Parse("2021-12-31");
-//        Dictionary<string, Dictionary<long, double?>> data = new Dictionary<string, Dictionary<long, double?>>();
-
-//        if (symbol.Length == 3 && symbol != "USD" && symbol != "EUR" && symbol != "GBP")
-//        {
-//            using (var handler = new HttpClientHandler() { UseCookies = false, AllowAutoRedirect = true })
-//            using (var client = new HttpClient(handler))
-//            {
-//                client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
-//                client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate");
-//                client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-//                client.DefaultRequestHeaders.Add("Origin", "https://www.tefas.gov.tr");
-//                client.DefaultRequestHeaders.Referrer = new Uri("https://www.tefas.gov.tr");
-
-//                DateTime currentStartDate = startDateVal;
-
-//                data[symbol] = new Dictionary<long, double?>();
-
-//                while (currentStartDate < endDateVal)
-//                {
-//                    DateTime currentEndDate = currentStartDate.AddMonths(3);
-//                    if (currentEndDate > endDateVal)
-//                    {
-//                        currentEndDate = endDateVal;
-//                    }
-
-//                    string package = $"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih={currentStartDate:dd.MM.yyyy}&bittarih={currentEndDate:dd.MM.yyyy}&fonturkod=&fonunvantip=";
-//                    HttpContent _Body = new StringContent(package, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");
-
-//                    var response = await client.PostAsync("https://www.tefas.gov.tr/api/DB/BindHistoryInfo", _Body);
-
-//                    string responseBody = "";
-//                    JObject myObject = new JObject();
-//                    JArray timestampCloses = new JArray();
-
-//                    try
-//                    {
-//                        response.EnsureSuccessStatusCode();
-//                        responseBody = await response.Content.ReadAsStringAsync();
-//                        myObject = JObject.Parse(responseBody);
-//                        timestampCloses = (JArray)myObject["data"];
-//                    }
-//                    catch (HttpRequestException e)
-//                    {
-//                        Console.WriteLine($"Request error: {e.Message}");
-//                    }
-
-//                    for (int i = 0; i < timestampCloses.Count; i++)
-//                    {
-//                        long timestamp = (long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 8640000) * 86400;
-//                        if (timestamp > new DateTimeOffset(endDateVal).ToUnixTimeSeconds())
-//                        {
-//                            break;
-//                        }
-//                        else
-//                        {
-//                            double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
-//                            if (!data[symbol].ContainsKey(timestamp))
-//                            {
-//                                data[symbol][timestamp] = closeValue;
-//                            }
-//                        }
-//                    }
-
-//                    currentStartDate = currentEndDate;
-//                }
-//            }
-//        }
-
-//        // Sonuçları yazdırma (isteğe bağlı)
-//        foreach (var entry in data[symbol])
-//        {
-//            Console.WriteLine($"Timestamp: {entry.Key}, Close Value: {entry.Value}");
-//        }
-//    }
-//}
