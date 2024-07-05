@@ -317,14 +317,14 @@ internal class Program
                             
                             for (int i = 0; i < timestampCloses.Count(); i++)
                             {
-                                if ((long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
+                                if ((long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
                                 {
                                     i = timestampCloses.Count();
                                 }
                                 else
                                 {
                                     double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
-                                    data[symbol][(long)Math.Floor((decimal)timestampCloses[i]["TARIH"] / 86400000) * 86400] = closeValue;
+                                    data[symbol][(long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400] = closeValue;
                                 }
                             }
                         }
@@ -334,7 +334,17 @@ internal class Program
                 else
                 {
                     // Send a GET request to the Yahoo Finance API for other symbols
-                    string url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}{stockPrefix}?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
+                    string url = "";
+                    bool isCurrency = false;
+                    if (symbol == "USD" | symbol == "EUR" | symbol == "GBP")
+                    {
+                        isCurrency = true;
+                        url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}TRY=X?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
+                    }
+                    else
+                    {
+                        url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}{stockPrefix}?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
+                    }
                     HttpResponseMessage response = await client.GetAsync(url);
                     string responseBody = "";
                     JObject myObject = new JObject();
@@ -360,14 +370,16 @@ internal class Program
                         data[symbol] = new Dictionary<long, double?>();
                         for (int i = 0; i < timestamps.Count(); i++)
                         {
-                            if (Math.Floor((decimal)timestamps[i] / 86400) * 86400 > period2)
+                            Console.WriteLine((long)timestamps[i]);
+                            Console.WriteLine(DateTimeOffset.FromUnixTimeSeconds((long)timestamps[i]).UtcDateTime);
+                            if ((long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400 ) > period2)
                             {
                                 i = timestamps.Count();
                             }
                             else
                             {
                                 double? closeValue = closes[i].Type == JTokenType.Null ? (double?)null : (double)closes[i];
-                                data[symbol][(long)Math.Floor((decimal)timestamps[i] / 86400) * 86400] = closeValue;
+                                data[symbol][(long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400)] = closeValue;
                             }
                         }
                     }
