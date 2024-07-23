@@ -1,21 +1,11 @@
-﻿using System;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.ComponentModel.Design;
+﻿using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Net;
-using System.Net.Http;
-using System.Reflection.Metadata;
-using System.Threading.Tasks;
-using Microsoft.VisualBasic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using static System.Net.WebRequestMethods;
-using System.Xml.Linq;
-using System.Net.Http.Headers;
+using CsvHelper;
 
 internal class Program
 {
@@ -126,7 +116,6 @@ internal class Program
             using (var reader = new StreamReader(configFilePath))
             {
                 string line = "";
-
                 while (!reader.EndOfStream)
                 {
                     line = reader.ReadLine();
@@ -147,6 +136,13 @@ internal class Program
         {
             Console.WriteLine("Config file not found. Created one only for you.");
             System.IO.File.Create(configFilePath).Dispose();
+            //write default config and read again.
+            using(var writer = new StreamWriter(configFilePath))
+            {
+                writer.WriteLine("StockPostfix:.IS");
+                writer.WriteLine("CommodityCurrency:TRY");
+            }
+            GetConfig();
         }
     }
     static async Task PriceUpdater()
@@ -160,6 +156,7 @@ internal class Program
         var symbolsWithDates = new Dictionary<string, string[]>();
 
         // Check if the file exists and read the latest date
+        string[]? headers = null;
         if (System.IO.File.Exists(filePath))
         {
             using (var reader = new StreamReader(filePath))
@@ -169,7 +166,7 @@ internal class Program
                 { 
                     var headerLine = reader.ReadLine();
                     if (headerLine == null) { throw new NullReferenceException(); };
-                    var headers = headerLine.Split(';');
+                    headers = headerLine.Split(';');
                     for (int i = 1; i < headers.Length; i++)
                     {
                         symbols.Add(headers[i]);
@@ -233,11 +230,13 @@ internal class Program
             
             long period1 = 0;
             long period2 = 0;
+            //string[] headers = null;
+            //using (var reader = new StreamReader(filePath)) { headers = reader.ReadLine().Split(";"); };
             foreach (var symbol in symbols)
             {
                 client = new HttpClient();
                 client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36");
-
+                
                 period1 = 0; // first transaction unix date
                 period2 = (long)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds(); //today unix date
                 if (symbolsWithDates.ContainsKey(symbol))
@@ -252,7 +251,7 @@ internal class Program
                         period2 = ((DateTimeOffset)(DateTime.ParseExact(symbolsWithDates[symbol][1], dateFormats, CultureInfo.InvariantCulture).AddDays(1))).ToUnixTimeSeconds();
                     }
                 }
-                if (updateOnlyNewData && latestDate != DateTime.MinValue)
+                if (updateOnlyNewData && latestDate != DateTime.MinValue && headers.Contains(symbol) == true)
                 {
                     period1 = new DateTimeOffset(latestDate.AddDays(1)).ToUnixTimeSeconds();
                 }
@@ -367,8 +366,8 @@ internal class Program
                         data[symbol] = new Dictionary<long, double?>();
                         for (int i = 0; i < timestamps.Count(); i++)
                         {
-                            Console.WriteLine((long)timestamps[i]);
-                            Console.WriteLine(DateTimeOffset.FromUnixTimeSeconds((long)timestamps[i]).UtcDateTime);
+                            //Console.WriteLine((long)timestamps[i]);
+                            //Console.WriteLine(DateTimeOffset.FromUnixTimeSeconds((long)timestamps[i]).UtcDateTime);
                             if ((long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400 ) > period2)
                             {
                                 i = timestamps.Count();
@@ -391,6 +390,15 @@ internal class Program
                     allTimestamps.Add(timestamp);
                 }
             }
+
+            using (var reader = new StreamReader(filePath))
+            using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
+            {
+
+                var records = csv.GetRecords<dynamic>();
+                
+            }
+
             using (var writer = new StreamWriter(filePath, append: appendToFile))
             {
                 if (!appendToFile)
@@ -403,10 +411,25 @@ internal class Program
                     }
                     writer.WriteLine();
                 }
+                
+                
+
+
+                //if there is new commodity out there
+                //foreach (var symbol in symbols)
+                //{
+                //    if (headers.Contains(symbol) == false) { writer.Write($";{symbol}"); };
+                //}
                 foreach (var timestamp in allTimestamps)
                 {
                     var date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime.ToString("yyyy-MM-dd");
                     DateTime parsedDate = DateTime.ParseExact(date, dateFormats, CultureInfo.InvariantCulture);
+                    
+                    
+                    
+                    
+                    
+                    
                     if (!updateOnlyNewData || parsedDate > latestDate)
                     {
                         writer.Write($"{date}");
@@ -423,6 +446,7 @@ internal class Program
                         }
                         writer.WriteLine();
                     }
+                    //For new commodities
                 }
             }
         }
@@ -454,7 +478,10 @@ internal class Program
                 for (int i = 1; i < headers.Length; i++)
                 {
                     symbols.Add(headers[i]);
-                    writer.WriteLine($"commodity {(headers[i].Any(char.IsDigit) ? "\"" + headers[i] + "\""  : headers[i])} 1.000,00");
+                    if (headers[i] != options["CommodityCurrency"])
+                    {
+                        writer.WriteLine($"commodity {(headers[i].Any(char.IsDigit) ? "\"" + headers[i] + "\"" : headers[i])} 1.000,00");
+                    }
                 }
                 writer.WriteLine("; ---");
                 writer.WriteLine("; Prices");
