@@ -6,6 +6,7 @@ using Newtonsoft.Json.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using CsvHelper;
+using System.Collections.Immutable;
 
 internal class Program
 {
@@ -390,16 +391,9 @@ internal class Program
                     allTimestamps.Add(timestamp);
                 }
             }
-
+            string tempFilePath = "Commodity-Prices_Temp.csv";
+            using (var writer = new StreamWriter(tempFilePath, append: false))
             using (var reader = new StreamReader(filePath))
-            using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
-            {
-
-                var records = csv.GetRecords<dynamic>();
-                
-            }
-
-            using (var writer = new StreamWriter(filePath, append: appendToFile))
             {
                 if (!appendToFile)
                 {
@@ -410,32 +404,31 @@ internal class Program
                         writer.Write($";{symbol}");
                     }
                     writer.WriteLine();
+                    reader.ReadLine();
                 }
-                
-                
-
-
-                //if there is new commodity out there
-                //foreach (var symbol in symbols)
-                //{
-                //    if (headers.Contains(symbol) == false) { writer.Write($";{symbol}"); };
-                //}
-                foreach (var timestamp in allTimestamps)
+                else
                 {
-                    var date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime.ToString("yyyy-MM-dd");
-                    DateTime parsedDate = DateTime.ParseExact(date, dateFormats, CultureInfo.InvariantCulture);
-                    
-                    
-                    
-                    
-                    
-                    
-                    if (!updateOnlyNewData || parsedDate > latestDate)
+                    writer.Write(reader.ReadLine());
+                    foreach (var symbol in symbols)
                     {
-                        writer.Write($"{date}");
+                        if (!headers.Contains(symbol))
+                        {
+                            writer.Write($";{symbol}");
+                        }
+                    }
+                    writer.WriteLine();
+                }
+                int i = 0; 
+                DateTime firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
+                while (i <= (allTimestamps.Count-1)) //because of zero index
+                {
+                    if (reader.EndOfStream == true)
+                    {
+                        firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
+                        writer.Write($"{firstTimestamp.ToShortDateString()}");
                         foreach (var symbol in symbols)
                         {
-                            if (data[symbol].TryGetValue(timestamp, out var close))
+                            if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close))
                             {
                                 writer.Write($";{close?.ToString() ?? ""}");
                             }
@@ -445,10 +438,68 @@ internal class Program
                             }
                         }
                         writer.WriteLine();
+                        i++;
                     }
-                    //For new commodities
+                    else
+                    {
+                        string readedLine = reader.ReadLine();
+                        string readedDate = readedLine;
+                        readedDate = readedDate.Substring(0, readedDate.IndexOf(";"));
+                        if (readedDate == firstTimestamp.ToShortDateString())
+                        {
+                            writer.Write(readedLine);
+                            foreach (var symbol in symbols)
+                            {
+                                if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close))
+                                {
+                                    writer.Write($";{close?.ToString() ?? ""}");
+                                }
+                                else
+                                {
+                                    //writer.Write(";");
+                                }
+                            }
+                            writer.WriteLine();
+                            i++;
+                            firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
+                        }
+                        else
+                        {
+                            writer.WriteLine(readedLine);
+                        }
+                    }
                 }
+
+                //foreach (var timestamp in allTimestamps)
+                //{
+                //    var date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime.ToString("yyyy-MM-dd");
+                //    DateTime parsedDate = DateTime.ParseExact(date, dateFormats, CultureInfo.InvariantCulture);
+
+                //    if (!updateOnlyNewData || parsedDate > latestDate || 1 == 1)
+                //    {
+                //        writer.Write($"{date}");
+                //        foreach (var symbol in symbols)
+                //        {
+                //            if (!headers.Contains(symbol))
+                //            {
+                //                //
+                //            }
+                //            if (data[symbol].TryGetValue(timestamp, out var close))
+                //            {
+                //                writer.Write($";{close?.ToString() ?? ""}");
+                //            }
+                //            else
+                //            {
+                //                writer.Write(";");
+                //            }
+                //        }
+                //        writer.WriteLine();
+                //    }
+                //    //For new commodities
+                //}
             }
+            File.Move(tempFilePath, filePath, true);
+            File.Delete(tempFilePath);
         }
         catch (HttpRequestException e)
         {
