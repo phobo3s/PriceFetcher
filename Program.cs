@@ -5,7 +5,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using CsvHelper;
 using System.Collections.Immutable;
 
 internal class Program
@@ -14,6 +13,7 @@ internal class Program
     static Dictionary<string,string> options = new Dictionary<string, string>();
     // Main prices.csv path. it is like a database for prices.
     static string filePath = "Commodity-Prices.csv";
+    static string tempFilePath = "Commodity-Prices_Temp.csv";
     // Define date formats to handle different formats
     static string[] dateFormats = { "dd/MM/yyyy", "dd.MM.yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d.MM.yyyy", "yyyy-MM-dd" };
     // write some comment here.
@@ -36,6 +36,7 @@ internal class Program
         Console.WriteLine("2. Parse Prices");
         Console.WriteLine("3. Create commodity start/end dates Csv");
         Console.WriteLine("4. Get Config");
+        Console.WriteLine("5. Delete price database lines");
         string? userInput = Console.ReadLine();
         bool exit = false;
         switch (userInput)
@@ -54,6 +55,19 @@ internal class Program
                 break;
             case "4":
                 GetConfig();
+                break;
+            case "5":
+                Console.WriteLine("please enter delete row count or default 1");
+                string input = Console.ReadLine();
+                int selectedOption;
+                if (int.TryParse(input, out selectedOption))
+                {
+                    DeletePriceLine(selectedOption);
+                }
+                else
+                {
+                    DeletePriceLine(1);
+                }
                 break;
             default:
                 Console.WriteLine("This is out of my imagination. please select again.");
@@ -145,6 +159,18 @@ internal class Program
             }
             GetConfig();
         }
+    }
+
+    static void DeletePriceLine(int? deleteLineCount)
+    {
+        if (!deleteLineCount.HasValue)
+        {
+            deleteLineCount = 1;
+        }
+        var lines = File.ReadAllLines(filePath);
+        File.WriteAllLines(tempFilePath, lines.Take(lines.Length - (int)deleteLineCount).ToArray());
+        File.Move(tempFilePath, filePath, true);
+        File.Delete(tempFilePath);
     }
     static async Task PriceUpdater()
     {
@@ -391,7 +417,7 @@ internal class Program
                     allTimestamps.Add(timestamp);
                 }
             }
-            string tempFilePath = "Commodity-Prices_Temp.csv";
+            if (allTimestamps.Count == 0) { return; };
             using (var writer = new StreamWriter(tempFilePath, append: false))
             using (var reader = new StreamReader(filePath))
             {
@@ -450,7 +476,7 @@ internal class Program
                             writer.Write(readedLine);
                             foreach (var symbol in symbols)
                             {
-                                if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close))
+                                if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close) && !headers.Contains(symbol))
                                 {
                                     writer.Write($";{close?.ToString() ?? ""}");
                                 }
@@ -461,7 +487,10 @@ internal class Program
                             }
                             writer.WriteLine();
                             i++;
-                            firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
+                            if (i <= (allTimestamps.Count - 1))
+                            {
+                                firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
+                            }
                         }
                         else
                         {
