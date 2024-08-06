@@ -6,6 +6,7 @@ using Newtonsoft.Json.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Collections.Immutable;
+using Microsoft.VisualBasic;
 
 internal class Program
 {
@@ -297,7 +298,6 @@ internal class Program
                     DateTimeOffset endDate = DateTimeOffset.FromUnixTimeSeconds(period2).UtcDateTime;
                     //
                     DateTimeOffset currentStartDate = startDate;
-                    data[symbol] = new Dictionary<long, double?>();
                     while (currentStartDate < endDate)
                     {
                         //
@@ -337,7 +337,7 @@ internal class Program
                         }
                         finally
                         {
-                            
+                            data[symbol] = new Dictionary<long, double?>();
                             for (int i = 0; i < timestampCloses.Count(); i++)
                             {
                                 if ((long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
@@ -354,7 +354,7 @@ internal class Program
                         currentStartDate = currentStartDate.AddMonths(3);
                     }
                 }
-                else
+                else if(symbol != "ZPLIB" && symbol != "ZGOLD")
                 {
                     // Send a GET request to the Yahoo Finance API for other symbols
                     string url = "";
@@ -407,6 +407,47 @@ internal class Program
                         }
                     }
                 }
+                else //ZPLIB ZGOLD and etf zone
+                {
+                    // Send a GET request to the ... api for funds data.
+                    string url = "";
+                    bool isCurrency = false;
+                    url = $"https://api.fintables.com/funds/{symbol}/chart/?start_date={DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime.ToString("yyyy-MM-dd")}&compare=";
+                    HttpResponseMessage response = await client.GetAsync(url);
+                    string responseBody = "";
+                    JObject myObject = new JObject();
+                    JArray timestampCloses = new JArray();
+                    try
+                    {
+                        response.EnsureSuccessStatusCode();
+                        responseBody = await response.Content.ReadAsStringAsync();
+                        myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
+                        timestampCloses = (JArray)myObject["results"]["data"];
+                    }
+                    catch (HttpRequestException e)
+                    {
+                        if (response.StatusCode == HttpStatusCode.NotFound)
+                        {
+                            Console.WriteLine($"not found one. {symbol}");
+                        }
+                    }
+                    finally
+                    {
+                        data[symbol] = new Dictionary<long, double?>();
+                        for (int i = 0; i < timestampCloses.Count(); i++)
+                        {
+                            if ((long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(),dateFormats,CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400 + 86400 > period2)
+                            {
+                                i = timestampCloses.Count();
+                            }
+                            else
+                            {
+                                double? closeValue = timestampCloses[i][$"{symbol}"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][$"{symbol}"];
+                                data[symbol][(long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(), dateFormats, CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400+86400] = closeValue;
+                            }
+                        }
+                    }
+                }
                 Console.WriteLine($"{symbol} downladed");
             }
             var allTimestamps = new SortedSet<long>();
@@ -450,6 +491,7 @@ internal class Program
                 {
                     if (reader.EndOfStream == true)
                     {
+                        // errro in here
                         firstTimestamp = DateTime.ParseExact(DateTimeOffset.FromUnixTimeSeconds(allTimestamps.ToList()[i]).UtcDateTime.ToString("yyyy-MM-dd"), dateFormats, CultureInfo.InvariantCulture);
                         writer.Write($"{firstTimestamp.ToShortDateString()}");
                         foreach (var symbol in symbols)
