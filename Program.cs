@@ -334,45 +334,112 @@ internal static class Program
                 {
                     period1 = new DateTimeOffset(latestDate.AddDays(1)).ToUnixTimeSeconds();
                 }
-                // data request and writing to dictionry starting here.
-                if (symbol.Length == 3 && symbol != "USD" && symbol != "EUR" && symbol != "GBP")
+                // not valid so don't try to download it.
+                if (period2 < period1)
                 {
-                    var handler = new HttpClientHandler() { UseCookies = false, AllowAutoRedirect = true };
-                    client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
-                    client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate");
-                    client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-                    client.DefaultRequestHeaders.Add("Origin", "https://www.tefas.gov.tr");
-                    client.DefaultRequestHeaders.Referrer = new Uri("https://www.tefas.gov.tr");
-                    string url = "https://www.tefas.gov.tr/api/DB/BindHistoryInfo";
-                    //
-                    DateTimeOffset startDate = DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime;
-                    DateTimeOffset endDate = DateTimeOffset.FromUnixTimeSeconds(period2).UtcDateTime;
-                    //
-                    DateTimeOffset currentStartDate = startDate;
-                    while (currentStartDate < endDate)
+                    data[symbol] = new Dictionary<long, double?>();
+                    //double? closeValue = timestampCloses[i][$"{symbol}"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][$"{symbol}"];
+                    //data[symbol][(long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(), dateFormats, CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400 + 86400] = closeValue;
+                }
+                // data request and writing to dictionry starting here.
+                else
+                {
+                    if (symbol.Length == 3 && symbol != "USD" && symbol != "EUR" && symbol != "GBP")
                     {
+                        var handler = new HttpClientHandler() { UseCookies = false, AllowAutoRedirect = true };
+                        client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
+                        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate");
+                        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+                        client.DefaultRequestHeaders.Add("Origin", "https://www.tefas.gov.tr");
+                        client.DefaultRequestHeaders.Referrer = new Uri("https://www.tefas.gov.tr");
+                        string url = "https://www.tefas.gov.tr/api/DB/BindHistoryInfo";
                         //
-                        DateTimeOffset currentEndDate = currentStartDate.AddMonths(3);
-                        if (currentEndDate >= endDate)
+                        DateTimeOffset startDate = DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime;
+                        DateTimeOffset endDate = DateTimeOffset.FromUnixTimeSeconds(period2).UtcDateTime;
+                        //
+                        DateTimeOffset currentStartDate = startDate;
+                        while (currentStartDate < endDate)
                         {
-                            currentEndDate = endDate;
-                        }else if (currentEndDate < startDate)
-                        {
-                            //currentEndDate == currentEndDate;
+                            //
+                            DateTimeOffset currentEndDate = currentStartDate.AddMonths(3);
+                            if (currentEndDate >= endDate)
+                            {
+                                currentEndDate = endDate;
+                            }else if (currentEndDate < startDate)
+                            {
+                                //currentEndDate == currentEndDate;
+                            }
+                            string package = $"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih={currentStartDate.ToString("dd.MM.yyyy")}&bittarih={currentEndDate.ToString("dd.MM.yyyy")}&fonturkod=&fonunvantip=";
+                            HttpContent _Body = new StringContent(package, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");                   
+                            string responseBody = "";
+                            JObject myObject = new JObject();
+                            JArray timestampCloses = new JArray();
+                            var response = new HttpResponseMessage { };
+                            try
+                            {
+                                response = client.PostAsync(url, _Body).Result;
+                                response.EnsureSuccessStatusCode();
+                                responseBody = response.Content.ReadAsStringAsync().Result;
+                                myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
+                                timestampCloses = (JArray)myObject["data"];
+                            }
+                            catch (HttpRequestException e)
+                            {
+                                if (response.StatusCode == HttpStatusCode.NotFound)
+                                {
+                                    Console.WriteLine($"not found one. {symbol}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("\nException Caught!");
+                                Console.WriteLine("Message :{0} ", ex.Message);
+                            }
+                            finally
+                            {
+                                data[symbol] = new Dictionary<long, double?>();
+                                for (int i = 0; i < timestampCloses.Count(); i++)
+                                {
+                                    if ((long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
+                                    {
+                                        i = timestampCloses.Count();
+                                    }
+                                    else
+                                    {
+                                        double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
+                                        data[symbol][(long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400] = closeValue;
+                                    }
+                                }
+                            }
+                            currentStartDate = currentStartDate.AddMonths(3);
                         }
-                        string package = $"fontip=YAT&sfontur=&fonkod={symbol}&fongrup=&bastarih={currentStartDate.ToString("dd.MM.yyyy")}&bittarih={currentEndDate.ToString("dd.MM.yyyy")}&fonturkod=&fonunvantip=";
-                        HttpContent _Body = new StringContent(package, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");                   
+                    }
+                    else if(symbol != "ZPLIB" && symbol != "ZGOLD")
+                    {
+                        // Send a GET request to the Yahoo Finance API for other symbols
+                        string url = "";
+                        bool isCurrency = false;
+                        if (symbol == "USD" | symbol == "EUR" | symbol == "GBP")
+                        {
+                            isCurrency = true;
+                            url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}TRY=X?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
+                        }
+                        else
+                        {
+                            url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}{stockPrefix}?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
+                        }
+                        HttpResponseMessage response = await client.GetAsync(url);
                         string responseBody = "";
                         JObject myObject = new JObject();
-                        JArray timestampCloses = new JArray();
-                        var response = new HttpResponseMessage { };
+                        JArray timestamps = new JArray();
+                        JArray closes = new JArray();
                         try
                         {
-                            response = client.PostAsync(url, _Body).Result;
                             response.EnsureSuccessStatusCode();
-                            responseBody = response.Content.ReadAsStringAsync().Result;
+                            responseBody = await response.Content.ReadAsStringAsync();
                             myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
-                            timestampCloses = (JArray)myObject["data"];
+                            timestamps = (JArray)myObject["chart"]["result"][0]["timestamp"];
+                            closes = (JArray)myObject["chart"]["result"][0]["indicators"]["quote"][0]["close"];
                         }
                         catch (HttpRequestException e)
                         {
@@ -381,125 +448,68 @@ internal static class Program
                                 Console.WriteLine($"not found one. {symbol}");
                             }
                         }
-                        catch (Exception ex)
+                        finally 
                         {
-                            Console.WriteLine("\nException Caught!");
-                            Console.WriteLine("Message :{0} ", ex.Message);
+                            data[symbol] = new Dictionary<long, double?>();
+                            for (int i = 0; i < timestamps.Count(); i++)
+                            {
+                                //Console.WriteLine((long)timestamps[i]);
+                                //Console.WriteLine(DateTimeOffset.FromUnixTimeSeconds((long)timestamps[i]).UtcDateTime);
+                                if ((long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400 ) > period2)
+                                {
+                                    i = timestamps.Count();
+                                }
+                                else
+                                {
+                                    double? closeValue = closes[i].Type == JTokenType.Null ? (double?)null : (double)closes[i];
+                                    data[symbol][(long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400)] = closeValue;
+                                }
+                            }
+                        }
+                    }
+                    else //ZPLIB ZGOLD and etf zone
+                    {
+                        // Send a GET request to the ... api for funds data.
+                        string url = "";
+                        bool isCurrency = false;
+                        url = $"https://api.fintables.com/funds/{symbol}/chart/?start_date={DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime.ToString("yyyy-MM-dd")}&compare=";
+                        HttpResponseMessage response = await client.GetAsync(url);
+                        string responseBody = "";
+                        JObject myObject = new JObject();
+                        JArray timestampCloses = new JArray();
+                        try
+                        {
+                            response.EnsureSuccessStatusCode();
+                            responseBody = await response.Content.ReadAsStringAsync();
+                            myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
+                            timestampCloses = (JArray)myObject["results"]["data"];
+                        }
+                        catch (HttpRequestException e)
+                        {
+                            if (response.StatusCode == HttpStatusCode.NotFound)
+                            {
+                                Console.WriteLine($"not found one. {symbol}");
+                            }
                         }
                         finally
                         {
                             data[symbol] = new Dictionary<long, double?>();
                             for (int i = 0; i < timestampCloses.Count(); i++)
                             {
-                                if ((long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400 > period2)
+                                if ((long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(),dateFormats,CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400 + 86400 > period2)
                                 {
                                     i = timestampCloses.Count();
                                 }
                                 else
                                 {
-                                    double? closeValue = timestampCloses[i]["FIYAT"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i]["FIYAT"];
-                                    data[symbol][(long)Math.Floor((double)timestampCloses[i]["TARIH"] / 86400000) * 86400] = closeValue;
+                                    double? closeValue = timestampCloses[i][$"{symbol}"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][$"{symbol}"];
+                                    data[symbol][(long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(), dateFormats, CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400+86400] = closeValue;
                                 }
                             }
                         }
-                        currentStartDate = currentStartDate.AddMonths(3);
                     }
+                    Console.WriteLine($"{symbol} downladed");
                 }
-                else if(symbol != "ZPLIB" && symbol != "ZGOLD")
-                {
-                    // Send a GET request to the Yahoo Finance API for other symbols
-                    string url = "";
-                    bool isCurrency = false;
-                    if (symbol == "USD" | symbol == "EUR" | symbol == "GBP")
-                    {
-                        isCurrency = true;
-                        url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}TRY=X?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
-                    }
-                    else
-                    {
-                        url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}{stockPrefix}?period1={period1}&period2={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}&interval=1d&events=history&includeAdjustedClose=true";
-                    }
-                    HttpResponseMessage response = await client.GetAsync(url);
-                    string responseBody = "";
-                    JObject myObject = new JObject();
-                    JArray timestamps = new JArray();
-                    JArray closes = new JArray();
-                    try
-                    {
-                        response.EnsureSuccessStatusCode();
-                        responseBody = await response.Content.ReadAsStringAsync();
-                        myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
-                        timestamps = (JArray)myObject["chart"]["result"][0]["timestamp"];
-                        closes = (JArray)myObject["chart"]["result"][0]["indicators"]["quote"][0]["close"];
-                    }
-                    catch (HttpRequestException e)
-                    {
-                        if (response.StatusCode == HttpStatusCode.NotFound)
-                        {
-                            Console.WriteLine($"not found one. {symbol}");
-                        }
-                    }
-                    finally 
-                    {
-                        data[symbol] = new Dictionary<long, double?>();
-                        for (int i = 0; i < timestamps.Count(); i++)
-                        {
-                            //Console.WriteLine((long)timestamps[i]);
-                            //Console.WriteLine(DateTimeOffset.FromUnixTimeSeconds((long)timestamps[i]).UtcDateTime);
-                            if ((long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400 ) > period2)
-                            {
-                                i = timestamps.Count();
-                            }
-                            else
-                            {
-                                double? closeValue = closes[i].Type == JTokenType.Null ? (double?)null : (double)closes[i];
-                                data[symbol][(long)(Math.Floor(((double)timestamps[i] + (isCurrency ? 60 * 60 : 0)) / 86400) * 86400)] = closeValue;
-                            }
-                        }
-                    }
-                }
-                else //ZPLIB ZGOLD and etf zone
-                {
-                    // Send a GET request to the ... api for funds data.
-                    string url = "";
-                    bool isCurrency = false;
-                    url = $"https://api.fintables.com/funds/{symbol}/chart/?start_date={DateTimeOffset.FromUnixTimeSeconds(period1).UtcDateTime.ToString("yyyy-MM-dd")}&compare=";
-                    HttpResponseMessage response = await client.GetAsync(url);
-                    string responseBody = "";
-                    JObject myObject = new JObject();
-                    JArray timestampCloses = new JArray();
-                    try
-                    {
-                        response.EnsureSuccessStatusCode();
-                        responseBody = await response.Content.ReadAsStringAsync();
-                        myObject = (JObject)JsonConvert.DeserializeObject(responseBody);
-                        timestampCloses = (JArray)myObject["results"]["data"];
-                    }
-                    catch (HttpRequestException e)
-                    {
-                        if (response.StatusCode == HttpStatusCode.NotFound)
-                        {
-                            Console.WriteLine($"not found one. {symbol}");
-                        }
-                    }
-                    finally
-                    {
-                        data[symbol] = new Dictionary<long, double?>();
-                        for (int i = 0; i < timestampCloses.Count(); i++)
-                        {
-                            if ((long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(),dateFormats,CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400 + 86400 > period2)
-                            {
-                                i = timestampCloses.Count();
-                            }
-                            else
-                            {
-                                double? closeValue = timestampCloses[i][$"{symbol}"].Type == JTokenType.Null ? (double?)null : (double)timestampCloses[i][$"{symbol}"];
-                                data[symbol][(long)Math.Floor((double)((DateTimeOffset)(DateTime.ParseExact(timestampCloses[i]["date"].ToString(), dateFormats, CultureInfo.InvariantCulture))).ToUnixTimeSeconds() / 86400) * 86400+86400] = closeValue;
-                            }
-                        }
-                    }
-                }
-                Console.WriteLine($"{symbol} downladed");
             }
             var allTimestamps = new SortedSet<long>();
             foreach (var symbolData in data.Values)
