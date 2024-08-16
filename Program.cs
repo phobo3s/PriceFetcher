@@ -7,8 +7,9 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Collections.Immutable;
 using Microsoft.VisualBasic;
+using System.Reflection.PortableExecutable;
 
-internal class Program
+internal static class Program
 {
     // options dictionary details in the GetConfig method.
     static Dictionary<string,string> options = new Dictionary<string, string>();
@@ -161,7 +162,6 @@ internal class Program
             GetConfig();
         }
     }
-
     static void DeletePriceLine(int? deleteLineCount)
     {
         if (!deleteLineCount.HasValue)
@@ -183,22 +183,93 @@ internal class Program
         List<string> symbols = new List<string>();
         var symbolsWithDates = new Dictionary<string, string[]>();
 
+        //check and read the commodities csv for start dates
+        if (System.IO.File.Exists(commoditiesStartCsvPath))
+        {
+            using (var reader = new StreamReader(commoditiesStartCsvPath))
+            {
+                symbols.Clear();
+                while (!reader.EndOfStream)
+                {
+                    var line = reader.ReadLine();
+                    var values = line.Split(';');
+                    symbols.Add(values[0]);
+                    string[] vals = { values[1], values[2] };
+                    symbolsWithDates.Add(values[0], vals);
+                }
+            }
+        }
+        else
+        {
+            throw new System.Exception($"commodities start dates file {commoditiesStartCsvPath} not found.");
+        }
         // Check if the file exists and read the latest date
         string[]? headers = null;
+        Dictionary<string, string?> addedSymbols = new();
         if (System.IO.File.Exists(filePath))
         {
-            using (var reader = new StreamReader(filePath))
+            // Read header to extract symbols
+            try
             {
-                // Read header to extract symbols
-                try
-                { 
-                    var headerLine = reader.ReadLine();
+                bool goOn;
+                do
+                {
+                    goOn = true;
+                    string? headerLine = "";
+                    using (var reader = new StreamReader(filePath))
+                    {
+                        reader.BaseStream.Position = 0;
+                        headerLine = reader.ReadLine(); 
+                    }
                     if (headerLine == null) { throw new NullReferenceException(); };
                     headers = headerLine.Split(';');
                     for (int i = 1; i < headers.Length; i++)
                     {
-                        symbols.Add(headers[i]);
+                        if (headers[i] != symbolsWithDates.Keys.ToList()[i - 1])
+                        {
+                            goOn = false;
+                            var csv = File.ReadLines(filePath) // not AllLines
+                                .Select((line, index) => index == 0
+                                    ? line.Substring(0, NthIndexOf(line, ";", i - 0)) + ";" + symbolsWithDates.Keys.ToList()[i - 1] + line.Substring(NthIndexOf(line, ";", i - 0))
+                                    : line.Substring(0, NthIndexOf(line, ";", i - 0)) + ";" + line.Substring(NthIndexOf(line, ";", i - 0)))
+                                .ToList(); // we should write into the same file, that´s why we materialize
+                            addedSymbols.Add(symbolsWithDates.Keys.ToList()[i - 1],null);
+                            File.WriteAllLines(filePath, csv);
+                            i = headers.Length;
+                        }
                     }
+                } while (goOn == false);
+                if (headers.Length-1 < symbolsWithDates.Count)
+                {
+                    for (int i = headers.Length;i <= symbolsWithDates.Count; i++)
+                    {
+                        var csv = File.ReadLines(filePath) // not AllLines
+                                .Select((line, index) => index == 0
+                                    ? line + ";" + symbolsWithDates.Keys.ToList()[i-1]
+                                    : line + ";")
+                                .ToList(); // we should write into the same file, that´s why we materialize
+                        addedSymbols.Add(symbolsWithDates.Keys.ToList()[i - 1], null);
+                        File.WriteAllLines(filePath, csv);
+                    }
+                }
+                //re read headers line
+                string? headerLine2 = "";
+                using (var reader = new StreamReader(filePath))
+                {
+                    reader.BaseStream.Position = 0;
+                    headerLine2 = reader.ReadLine();
+                }
+                if (headerLine2 == null) { throw new NullReferenceException(); };
+                headers = headerLine2.Split(';');
+                // recreate symbols
+                symbols.Clear();
+                for (int i = 1; i < headers.Length; i++)
+                {
+                    symbols.Add(headers[i]);
+                }
+                using (var reader = new StreamReader(filePath))
+                {
+                    reader.ReadLine(); //pass headerline
                     while (!reader.EndOfStream)
                     {
                         var line = reader.ReadLine();
@@ -210,11 +281,11 @@ internal class Program
                         }
                     }
                 }
-                catch(NullReferenceException ex)
-                {
-                    Console.WriteLine("CSV not formatted properly. Exiting");
-                    return;
-                }
+            }
+            catch (NullReferenceException ex)
+            {
+                Console.WriteLine("CSV not formatted properly. Exiting");
+                return;
             }
             // Ask the user if they want to update only new data
             Console.WriteLine("Do you want to update only new data? (Yes/No): ");
@@ -230,26 +301,6 @@ internal class Program
             Console.WriteLine($"commodities prices file {filePath} not found.");
             //return;
             System.IO.File.Create(filePath).Dispose();
-        }
-        //check and read the commodities csv for start dates
-        if (System.IO.File.Exists(commoditiesStartCsvPath))
-        {
-            using (var reader = new StreamReader(commoditiesStartCsvPath)) 
-            { 
-                symbols.Clear();
-                while (!reader.EndOfStream)
-                {
-                    var line = reader.ReadLine();
-                    var values = line.Split(';');
-                    symbols.Add(values[0]);
-                    string[] vals = {values[1], values[2]};
-                    symbolsWithDates.Add(values[0], vals);
-                }
-            }
-        }
-        else
-        {
-            Console.WriteLine($"commodities start dates file {commoditiesStartCsvPath} not found.");
         }
         string stockPrefix = ""; //default stock prefix ??
         if (options.ContainsKey("StockPostfix")) { stockPrefix = options["StockPostfix"]; }
@@ -279,7 +330,7 @@ internal class Program
                         period2 = ((DateTimeOffset)(DateTime.ParseExact(symbolsWithDates[symbol][1], dateFormats, CultureInfo.InvariantCulture).AddDays(1))).ToUnixTimeSeconds();
                     }
                 }
-                if (updateOnlyNewData && latestDate != DateTime.MinValue && headers.Contains(symbol) == true)
+                if (updateOnlyNewData && latestDate != DateTime.MinValue && !addedSymbols.ContainsKey(symbol))
                 {
                     period1 = new DateTimeOffset(latestDate.AddDays(1)).ToUnixTimeSeconds();
                 }
@@ -518,7 +569,7 @@ internal class Program
                             writer.Write(readedLine);
                             foreach (var symbol in symbols)
                             {
-                                if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close) && !headers.Contains(symbol))
+                                if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close))
                                 {
                                     writer.Write($";{close?.ToString() ?? ""}");
                                 }
@@ -650,5 +701,14 @@ internal class Program
             throw new Exception($"Komut çalıştırılamadı: {command}");
         }
         return result;
+    }
+    public static int NthIndexOf(this string target, string value, int n)
+    {
+        Match m = Regex.Match(target, "((" + Regex.Escape(value) + ").*?){" + n + "}");
+
+        if (m.Success)
+            return m.Groups[2].Captures[n - 1].Index;
+        else
+            return -1;
     }
 }
