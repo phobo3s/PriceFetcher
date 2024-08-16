@@ -527,13 +527,13 @@ internal static class Program
                 else
                 {
                     writer.Write(reader.ReadLine());
-                    foreach (var symbol in symbols)
-                    {
-                        if (!headers.Contains(symbol))
-                        {
-                            writer.Write($";{symbol}");
-                        }
-                    }
+                    //foreach (var symbol in symbols)
+                    //{
+                    //    if (!headers.Contains(symbol))
+                    //    {
+                    //        writer.Write($";{symbol}");
+                    //    }
+                    //}
                     writer.WriteLine();
                 }
                 int i = 0; 
@@ -566,19 +566,21 @@ internal static class Program
                         readedDate = readedDate.Substring(0, readedDate.IndexOf(";"));
                         if (readedDate == firstTimestamp.ToShortDateString())
                         {
-                            writer.Write(readedLine);
+                            //writer.Write(readedLine);
+                            int headerIndex = 0;
                             foreach (var symbol in symbols)
                             {
+                                headerIndex = headerIndex + 1;
                                 if (data[symbol].TryGetValue(allTimestamps.ToList()[i], out var close))
                                 {
-                                    writer.Write($";{close?.ToString() ?? ""}");
+                                    readedLine = readedLine.Substring(0, NthIndexOf(readedLine, ";", headerIndex)+1) + close.ToString() + readedLine.Substring(NthIndexOf(readedLine, ";", headerIndex)+1);
                                 }
                                 else
                                 {
                                     //writer.Write(";");
                                 }
                             }
-                            writer.WriteLine();
+                            writer.WriteLine(readedLine);
                             i++;
                             if (i <= (allTimestamps.Count - 1))
                             {
